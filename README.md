@@ -19,7 +19,9 @@
 #
 -->
 
+  
 <img src="http://mynewt.apache.org/img/logo.svg" width="250" alt="Apache Mynewt">
+
 
 ## Overview
 
@@ -27,14 +29,14 @@ Apache NimBLE is an open-source Bluetooth 5.1 stack (both Host & Controller)
 that completely replaces the proprietary SoftDevice on Nordic chipsets. It is
 part of [Apache Mynewt project](https://github.com/apache/mynewt-core).
 
-Features highlight:
-  - Support for 251 byte packet size
+Feature highlight:
+  - Support for 251 byte packet size.
   - Support for all 4 roles concurrently - Broadcaster, Observer, Peripheral and Central
   - Support for up to 32 simultaneous connections.
   - Legacy and SC (secure connections) SMP support (pairing and bonding).
   - Advertising Extensions.
   - Periodic Advertising.
-  - Coded (aka Long Range) and 2M PHYs.
+  - Coded (a.k.a. Long Range) and 2M PHYs.
   - Bluetooth Mesh.
 
 ## Supported hardware
@@ -103,6 +105,15 @@ Implements a simple BLE peripheral that supports the Nordic
 UART / Serial Port Emulation service
 (https://developer.nordicsemi.com/nRF5_SDK/nRF51_SDK_v8.x.x/doc/8.0.0/s110/html/a00072.html).
 
+## External projects using NimBLE
+
+Several other projects provide support for using NimBLE either by [NPL port](https://github.com/apache/mynewt-nimble/tree/master/porting) or forking:
+
+ * [The Espressif ESP-IDF](https://docs.espressif.com/projects/esp-idf/en/latest/esp32/api-reference/bluetooth/nimble/index.html) contains a NimBLE port for ESP-32 devices.
+ * [The RIOT](https://doc.riot-os.org/group__pkg__nimble.html) operating system contains a package for using NimBLE.
+
+ If you publish a NimBLE port, please let us know to include it here!
+
 # Getting Help
 
 If you are having trouble using or contributing to Apache Mynewt NimBLE, or just
@@ -112,7 +123,7 @@ want to talk to a human about what you're working on, you can contact us via the
 Although not a formal channel, you can also find a number of core developers
 on the #mynewt channel on Freenode IRC or #general channel on [Mynewt Slack](https://mynewt.slack.com/join/shared_invite/enQtNjA1MTg0NzgyNzg3LTcyMmZiOGQzOGMxM2U4ODFmMTIwNjNmYTE5Y2UwYjQwZWIxNTE0MTUzY2JmMTEzOWFjYWZkNGM0YmM4MzAxNWQ)
 
-Also, be sure to checkout the [Frequently Asked Questions](https://mynewt.apache.org/faq/answers)
+Also, be sure to checkout the [Frequently Asked Questions](https://mynewt.apache.org/latest/mynewt_faq)
 for some help troubleshooting first.
 
 # Contributing

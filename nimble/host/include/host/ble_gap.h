@@ -135,6 +135,11 @@ struct hci_conn_update;
 #define BLE_GAP_EVENT_PERIODIC_SYNC_LOST    22
 #define BLE_GAP_EVENT_SCAN_REQ_RCVD         23
 #define BLE_GAP_EVENT_PERIODIC_TRANSFER     24
+#define BLE_GAP_EVENT_PATHLOSS_THRESHOLD    25
+#define BLE_GAP_EVENT_TRANSMIT_POWER        26
+#define BLE_GAP_EVENT_PARING_COMPLETE       27
+#define BLE_GAP_EVENT_SUBRATE_CHANGE        28
+#define BLE_GAP_EVENT_VS_HCI                29
 
 /*** Reason codes for the subscribe GAP event. */
 
@@ -973,6 +978,113 @@ struct ble_gap_event {
             uint8_t adv_clk_accuracy;
         } periodic_transfer;
 #endif
+
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+        /**
+         * Represents a change in either local transmit power or remote transmit
+         * power. Valid for the following event types:
+         *     o BLE_GAP_EVENT_PATHLOSS_THRESHOLD
+         */
+
+	struct {
+	    /** Connection handle */
+	    uint16_t conn_handle;
+
+	    /** Current Path Loss */
+	    uint8_t current_path_loss;
+
+	    /** Entered Zone */
+	    uint8_t zone_entered;
+	} pathloss_threshold;
+
+        /**
+         * Represents crossing of path loss threshold set via LE Set Path Loss
+         * Reporting Parameter command. Valid for the following event types:
+         *     o BLE_GAP_EVENT_TRANSMIT_POWER
+         */
+
+	struct {
+	    /** BLE_ERR_SUCCESS on success or error code on failure */
+	    uint8_t status;
+
+	    /** Connection Handle */
+	    uint16_t conn_handle;
+
+	    /** Reason indicating why event was sent */
+	    uint8_t reason;
+
+	    /** Advertising PHY */
+	    uint8_t phy;
+
+	    /** Transmit power Level */
+	    uint8_t transmit_power_level;
+
+	    /** Transmit Power Level Flag */
+	    uint8_t transmit_power_level_flag;
+
+	    /** Delta indicating change in transmit Power Level */
+	    uint8_t delta;
+	} transmit_power;
+#endif
+        /**
+         * Represents a received Pairing Complete message
+         *
+         * Valid for the following event types:
+         *     o BLE_GAP_EVENT_PARING_COMPLETE
+         */
+        struct {
+            /**
+             * Indicates the result of the encryption state change attempt;
+             *     o 0: the encrypted state was successfully updated;
+             *     o BLE host error code: the encryption state change attempt
+             *       failed for the specified reason.
+             */
+            int status;
+
+            /** The handle of the relevant connection. */
+            uint16_t conn_handle;
+        } pairing_complete;
+
+#if MYNEWT_VAL(BLE_CONN_SUBRATING)
+        /**
+         * Represents a subrate change event that indicates connection subrate update procedure
+         * has completed and some parameters have changed  Valid for
+         * the following event types:
+         *     o BLE_GAP_EVENT_SUBRATE_CHANGE
+         */
+        struct {
+            /** BLE_ERR_SUCCESS on success or error code on failure */
+            uint8_t status;
+
+            /** Connection Handle */
+            uint16_t conn_handle;
+
+            /** Subrate Factor */
+            uint16_t subrate_factor;
+
+            /** Peripheral Latency */
+            uint16_t periph_latency;
+
+            /** Continuation Number */
+            uint16_t cont_num;
+
+            /** Supervision Timeout */
+            uint16_t supervision_tmo;
+        } subrate_change;
+#endif
+
+#if MYNEWT_VAL(BLE_HCI_VS)
+        /**
+         * Represents a received vendor-specific HCI event
+         *
+         * Valid for the following event types:
+         *     o BLE_GAP_EVENT_VS_HCI
+         */
+        struct {
+            const void *ev;
+            uint8_t length;
+        } vs_hci;
+#endif
     };
 };
 
@@ -1160,7 +1272,19 @@ struct ble_gap_ext_adv_params {
     /** If perform high-duty directed advertising */
     unsigned int high_duty_directed:1;
 
-    /** If use legacy PDUs for advertising */
+    /** If use legacy PDUs for advertising.
+     *
+     *  Valid combinations of the connectable, scannable, directed,
+     *  high_duty_directed options with the legcy_pdu flag are:
+     *  - IND       -> legacy_pdu + connectable + scannable
+     *  - LD_DIR    -> legacy_pdu + connectable + directed
+     *  - HD_DIR    -> legacy_pdu + connectable + directed + high_duty_directed
+     *  - SCAN      -> legacy_pdu + scannable
+     *  - NONCONN   -> legacy_pdu
+     *
+     * Any other combination of these options combined with the legacy_pdu flag
+     * are invalid.
+     */
     unsigned int legacy_pdu:1;
 
     /** If perform anonymous advertising */
@@ -1314,6 +1438,18 @@ int ble_gap_ext_adv_remove(uint8_t instance);
  *                      other error code on failure.
  */
 int ble_gap_ext_adv_clear(void);
+
+/**
+ * Indicates whether an advertisement procedure is currently in progress on
+ * the specified Instance
+ *
+ * @param instance            Instance Id
+ *
+ * @return 0 if there is no active advertising procedure for the instance,
+ *         1 otherwise
+ *
+ */
+int ble_gap_ext_adv_active(uint8_t instance);
 #endif
 
 /* Periodic Advertising */
@@ -1592,6 +1728,16 @@ int ble_gap_disc(uint8_t own_addr_type, int32_t duration_ms,
  *                              its last Scan Duration until it begins the
  *                              subsequent Scan Duration. Specify 0 to scan
  *                              continuously. Units are 1.28 second.
+ * @param filter_duplicates     Set to enable packet filtering in the
+ *                              controller
+ * @param filter_policy         Set the used filter policy. Valid values are:
+ *                                      - BLE_HCI_SCAN_FILT_NO_WL
+ *                                      - BLE_HCI_SCAN_FILT_USE_WL
+ *                                      - BLE_HCI_SCAN_FILT_NO_WL_INITA
+ *                                      - BLE_HCI_SCAN_FILT_USE_WL_INITA
+ *                                      - BLE_HCI_SCAN_FILT_MAX
+ *                              This parameter is ignored unless
+ *                              @p filter_duplicates is set.
  * @param limited               If limited discovery procedure should be used.
  * @param uncoded_params        Additional arguments specifying the particulars
  *                              of the discovery procedure for uncoded PHY.
@@ -1805,17 +1951,57 @@ int ble_gap_update_params(uint16_t conn_handle,
  * Configure LE Data Length in controller (OGF = 0x08, OCF = 0x0022).
  *
  * @param conn_handle      Connection handle.
- * @param tx_octets        The preferred value of payload octets that the Controller
- *                         should use for a new connection (Range
- *                         0x001B-0x00FB).
- * @param tx_time          The preferred maximum number of microseconds that the local Controller
- *                         should use to transmit a single link layer packet
- *                         (Range 0x0148-0x4290).
+ * @param tx_octets        The preferred value of payload octets that the
+ *                         Controller should use for a new connection
+ *                         (Range 0x001B-0x00FB).
+ * @param tx_time          The preferred maximum number of microseconds that
+ *                         the local Controller should use to transmit a single
+ *                         link layer packet (Range 0x0148-0x4290).
  *
  * @return                 0 on success,
  *                         other error code on failure.
  */
-int ble_gap_set_data_len(uint16_t conn_handle, uint16_t tx_octets, uint16_t tx_time);
+int ble_gap_set_data_len(uint16_t conn_handle, uint16_t tx_octets,
+                         uint16_t tx_time);
+
+/**
+ * Read LE Suggested Default Data Length in controller
+ * (OGF = 0x08, OCF = 0x0024).
+ *
+ * @param out_sugg_max_tx_octets    The Host's suggested value for the
+ *                                  Controller's maximum transmitted number of
+ *                                  payload octets in LL Data PDUs to be used
+ *                                  for new connections. (Range 0x001B-0x00FB).
+ * @param out_sugg_max_tx_time      The Host's suggested value for the
+ *                                  Controller's maximum packet transmission
+ *                                  time for packets containing LL Data PDUs to
+ *                                  be used for new connections.
+ *                                  (Range 0x0148-0x4290).
+ *
+ * @return                          0 on success,
+ *                                  other error code on failure.
+ */
+int ble_gap_read_sugg_def_data_len(uint16_t *out_sugg_max_tx_octets,
+                                   uint16_t *out_sugg_max_tx_time);
+
+/**
+ * Configure LE Suggested Default Data Length in controller
+ * (OGF = 0x08, OCF = 0x0024).
+ *
+ * @param sugg_max_tx_octets    The Host's suggested value for the Controller's
+ *                              maximum transmitted number of payload octets in
+ *                              LL Data PDUs to be used for new connections.
+ *                              (Range 0x001B-0x00FB).
+ * @param sugg_max_tx_time      The Host's suggested value for the Controller's
+ *                              maximum packet transmission time for packets
+ *                              containing LL Data PDUs to be used for new
+ *                              connections. (Range 0x0148-0x4290).
+ *
+ * @return                      0 on success,
+ *                              other error code on failure.
+ */
+int ble_gap_write_sugg_def_data_len(uint16_t sugg_max_tx_octets,
+                                    uint16_t sugg_max_tx_time);
 
 /**
  * Initiates the GAP security procedure.
@@ -2024,6 +2210,45 @@ int ble_gap_set_prefered_default_le_phy(uint8_t tx_phys_mask,
 int ble_gap_set_prefered_le_phy(uint16_t conn_handle, uint8_t tx_phys_mask,
                                 uint8_t rx_phys_mask, uint16_t phy_opts);
 
+#if MYNEWT_VAL(BLE_CONN_SUBRATING)
+/**
+ * Set default subrate
+ *
+ * @param subrate_min       Min subrate factor allowed in request by a peripheral
+ * @param subrate_max       Max subrate factor allowed in request by a peripheral
+ * @param max_latency       Max peripheral latency allowed in units of
+ *                          subrated conn interval.
+ *
+ * @param cont_num          Min number of underlying conn event to remain active
+ *                          after a packet containing PDU with non-zero length field
+ *                          is sent or received in request by a peripheral.
+ *
+ * @param supervision_timeout Max supervision timeout allowed in request by a peripheral
+ */
+int ble_gap_set_default_subrate(uint16_t subrate_min, uint16_t subrate_max, uint16_t max_latency,
+                                uint16_t cont_num, uint16_t supervision_timeout);
+
+/**
+ * Subrate Request
+ *
+ * @param conn_handle       Connection Handle of the ACL.
+ * @param subrate_min       Min subrate factor to be applied
+ * @param subrate_max       Max subrate factor to be applied
+ * @param max_latency       Max peripheral latency allowed in units of
+ *                          subrated conn interval.
+ *
+ * @param cont_num          Min number of underlying conn event to remain active
+ *                          after a packet containing PDU with non-zero length field
+ *                          is sent or received in request by a peripheral.
+ *
+ * @param supervision_timeout  Max supervision timeout allowed for this connection
+ */
+
+int
+ble_gap_subrate_req(uint16_t conn_handle, uint16_t subrate_min, uint16_t subrate_max,
+                    uint16_t max_latency, uint16_t cont_num,
+                    uint16_t supervision_timeout);
+#endif
 /**
  * Event listener structure
  *
@@ -2063,6 +2288,82 @@ int ble_gap_event_listener_register(struct ble_gap_event_listener *listener,
  */
 int ble_gap_event_listener_unregister(struct ble_gap_event_listener *listener);
 
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+/**
+ * Enable Set Path Loss Reporting.
+ *
+ * @param conn_handle       Connection handle
+ * @params enable           1: Enable
+ * 			    0: Disable
+ *
+ * @return                   0 on success; nonzero on failure.
+ */
+
+int ble_gap_set_path_loss_reporting_enable(uint16_t conn_handle, uint8_t enable);
+
+/**
+ * Enable Reporting of Transmit Power
+ *
+ * @param conn_handle       Connection handle
+ * @params local_enable     1: Enable local transmit power reports
+ *                          0: Disable local transmit power reports
+ *
+ * @params remote_enable    1: Enable remote transmit power reports
+ *                          0: Disable remote transmit power reports
+ *
+ * @return                  0 on success; nonzero on failure.
+ */
+int ble_gap_set_transmit_power_reporting_enable(uint16_t conn_handle,
+                                                uint8_t local_enable,
+                                                uint8_t remote_enable);
+
+/**
+ * LE Enhanced Read Transmit Power Level
+ *
+ * @param conn_handle            Connection handle
+ * @params phy                   Advertising Phy
+ *
+ * @params status                0 on success; nonzero on failure.
+ * @params conn_handle           Connection handle
+ * @params phy	                 Advertising Phy
+ *
+ * @params curr_tx_power_level   Current trasnmit Power Level
+ *
+ * @params mx_tx_power_level     Maximum transmit power level
+ *
+ * @return                       0 on success; nonzero on failure.
+ */
+int ble_gap_enh_read_transmit_power_level(uint16_t conn_handle, uint8_t phy,
+                                          uint8_t *out_status, uint8_t *out_phy,
+					  uint8_t *out_curr_tx_power_level,
+					  uint8_t *out_max_tx_power_level);
+
+/**
+ * Read Remote Transmit Power Level
+ *
+ * @param conn_handle       Connection handle
+ * @params phy              Advertising Phy
+ *
+ * @return                  0 on success; nonzero on failure.
+ */
+int ble_gap_read_remote_transmit_power_level(uint16_t conn_handle, uint8_t phy);
+
+/**
+ * Set Path Loss Reproting Param
+ *
+ * @param conn_handle       Connection handle
+ * @params high_threshold   High Threshold value for path loss
+ * @params high_hysteresis  Hysteresis value for high threshold
+ * @params low_threshold    Low Threshold value for path loss
+ * @params low_hysteresis   Hysteresis value for low threshold
+ * @params min_time_spent   Minimum time controller observes the path loss
+ *
+ * @return                  0 on success; nonzero on failure.
+ */
+int ble_gap_set_path_loss_reporting_param(uint16_t conn_handle, uint8_t high_threshold,
+                                          uint8_t high_hysteresis, uint8_t low_threshold,
+                                          uint8_t low_hysteresis, uint16_t min_time_spent);
+#endif
 #ifdef __cplusplus
 }
 #endif

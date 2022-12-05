@@ -22,6 +22,8 @@
 #include <assert.h>
 #include "syscfg/syscfg.h"
 #include "os/os.h"
+/* Keep os_cputime explicitly to enable build on non-Mynewt platforms */
+#include "os/os_cputime.h"
 #include "ble/xcvr.h"
 #include "nimble/ble.h"
 #include "nimble/nimble_opt.h"
@@ -44,6 +46,12 @@
 #if MYNEWT_VAL(BLE_LL_CFG_FEAT_LE_CODED_PHY)
 #error LE Coded PHY cannot be enabled on nRF51
 #endif
+
+static uint32_t
+ble_phy_mode_pdu_start_off(int phy_mode)
+{
+    return 40;
+}
 
 /* XXX: 4) Make sure RF is higher priority interrupt than schedule */
 
@@ -94,7 +102,6 @@ struct ble_phy_obj
     uint8_t phy_privacy;
     uint8_t phy_tx_pyld_len;
     uint8_t *rxdptr;
-    int8_t  rx_pwr_compensation;
     uint32_t phy_aar_scratch;
     uint32_t phy_access_address;
     struct ble_mbuf_hdr rxhdr;
@@ -408,7 +415,7 @@ ble_phy_set_start_time(uint32_t cputime, uint8_t rem_usecs)
 /**
  * Function is used to set PPI so that we can time out waiting for a reception
  * to occur. This happens for two reasons: we have sent a packet and we are
- * waiting for a respons (txrx should be set to ENABLE_TXRX) or we are
+ * waiting for a response (txrx should be set to ENABLE_TXRX) or we are
  * starting a connection event and we are a slave and we are waiting for the
  * master to send us a packet (txrx should be set to ENABLE_RX).
  *
@@ -618,8 +625,7 @@ ble_phy_rx_end_isr(void)
     /* Set RSSI and CRC status flag in header */
     ble_hdr = &g_ble_phy_data.rxhdr;
     assert(NRF_RADIO->EVENTS_RSSIEND != 0);
-    ble_hdr->rxinfo.rssi = (-1 * NRF_RADIO->RSSISAMPLE) +
-                            g_ble_phy_data.rx_pwr_compensation;
+    ble_hdr->rxinfo.rssi = (-1 * NRF_RADIO->RSSISAMPLE);
 
     dptr = g_ble_phy_data.rxdptr;
 
@@ -846,8 +852,6 @@ ble_phy_init(void)
 
     /* Set phy channel to an invalid channel so first set channel works */
     g_ble_phy_data.phy_chan = BLE_PHY_NUM_CHANS;
-
-    g_ble_phy_data.rx_pwr_compensation = 0;
 
     /* Toggle peripheral power to reset (just in case) */
     NRF_RADIO->POWER = 0;
@@ -1254,7 +1258,7 @@ ble_phy_tx(ble_phy_tx_pducb_t pducb, void *pducb_arg, uint8_t end_trans)
  * @return int 0: success; anything else is an error
  */
 int
-ble_phy_txpwr_set(int dbm)
+ble_phy_tx_power_set(int dbm)
 {
     /* Check valid range */
     assert(dbm <= BLE_PHY_MAX_PWR_DBM);
@@ -1283,7 +1287,8 @@ ble_phy_txpwr_set(int dbm)
  *
  * @return int Rounded power in dBm
  */
-int ble_phy_txpower_round(int dbm)
+int
+ble_phy_tx_power_round(int dbm)
 {
     /* "Rail" power level if outside supported range */
     if (dbm > NRF_TX_PWR_MAX_DBM) {
@@ -1305,15 +1310,9 @@ int ble_phy_txpower_round(int dbm)
  * @return int  The current PHY transmit power, in dBm
  */
 int
-ble_phy_txpwr_get(void)
+ble_phy_tx_power_get(void)
 {
     return g_ble_phy_data.phy_txpwr_dbm;
-}
-
-void
-ble_phy_set_rx_pwr_compensation(int8_t compensation)
-{
-    g_ble_phy_data.rx_pwr_compensation = compensation;
 }
 
 /**
@@ -1357,7 +1356,7 @@ ble_phy_setchan(uint8_t chan, uint32_t access_addr, uint32_t crcinit)
         NRF_RADIO->RXADDRESSES = (1 << 1);
         NRF_RADIO->CRCINIT = crcinit;
     } else {
-        /* Logical adddress 0 preconfigured */
+        /* Logical address 0 preconfigured */
         NRF_RADIO->TXADDRESS = 0;
         NRF_RADIO->RXADDRESSES = (1 << 0);
         NRF_RADIO->CRCINIT = BLE_LL_CRCINIT_ADV;

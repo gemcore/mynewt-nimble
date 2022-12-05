@@ -169,6 +169,25 @@ extern "C" {
  * @}
  */
 
+/**
+ * @brief LE key distribution
+ * @defgroup bt_host_key_dist LE key distribution
+ *
+ * @{
+ */
+
+/** Distibute LTK */
+#define BLE_HS_KEY_DIST_ENC_KEY              0x01
+
+/** Distribute IRK */
+#define BLE_HS_KEY_DIST_ID_KEY               0x02
+
+/** CSRK distibution and LinkKey are not supported */
+
+/**
+ * @}
+ */
+
 /** @brief Stack reset callback
  *
  * @param reason Reason code for reset
@@ -256,6 +275,9 @@ struct ble_hs_cfg {
      * This happens at startup and after a reset.
      */
     ble_hs_sync_fn *sync_cb;
+
+    /** Callback to handle generation of security keys */
+    ble_store_gen_key_fn *store_gen_key_cb;
 
     /* XXX: These need to go away. Instead, the nimble host package should
      * require the host-store API (not yet implemented)..

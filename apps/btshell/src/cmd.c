@@ -98,25 +98,32 @@ parse_dev_addr(const char *prefix, const struct kv_pair *addr_types,
 {
     char name[32];
     int rc;
+    int written = 0;
 
     if (!prefix) {
         name[0] = '\0';
     } else {
-        if (strlcpy(name, prefix, sizeof(name)) >= sizeof(name)) {
+        written = snprintf(name, sizeof(name), "%s", prefix);
+        if (written >= sizeof(name) || written < 0) {
             return EINVAL;
         }
     }
 
-    if (strlcat(name, "addr", sizeof(name)) >= sizeof(name)) {
+    rc = snprintf(name + written, sizeof(name) - written, "%s", "addr");
+    if (rc >= sizeof(name) - written || rc < 0) {
         return EINVAL;
     }
+    written += rc;
+
     rc = parse_arg_addr(name, addr);
     if (rc == ENOENT) {
         /* not found */
         return rc;
     } else if (rc == EAGAIN) {
         /* address found, but no type provided */
-        if (strlcat(name, "_type", sizeof(name)) >= sizeof(name)) {
+        rc = written;
+        written = snprintf(name + written, sizeof(name) - written, "%s", "_type");
+        if (written >= sizeof(name) - rc || written < 0) {
             return EINVAL;
         }
         addr->type = parse_arg_kv(name, addr_types, &rc);
@@ -130,7 +137,9 @@ parse_dev_addr(const char *prefix, const struct kv_pair *addr_types,
         return rc;
     } else {
         /* full address found, but let's just make sure there is no type arg */
-        if (strlcat(name, "_type", sizeof(name)) >= sizeof(name)) {
+        rc = written;
+        written = snprintf(name + written, sizeof(name) - written, "%s", "_type");
+        if (written >= sizeof(name) - rc || written < 0) {
             return EINVAL;
         }
         if (parse_arg_extract(name)) {
@@ -251,7 +260,7 @@ cmd_advertise_configure(int argc, char **argv)
 
     params.own_addr_type = parse_arg_kv_dflt("own_addr_type",
                                              cmd_own_addr_types,
-                                             BLE_OWN_ADDR_PUBLIC, &rc);
+                                             btshell_get_default_own_addr_type(), &rc);
     if (rc != 0) {
         console_printf("invalid 'own_addr_type' parameter\n");
         return rc;
@@ -464,7 +473,7 @@ static const struct shell_param advertise_configure_params[] = {
     {"directed", "directed advertising, usage: =[0-1], default: 0"},
     {"peer_addr_type", "usage: =[public|random|public_id|random_id], default: public"},
     {"peer_addr", "usage: =[XX:XX:XX:XX:XX:XX]"},
-    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public"},
+    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public if available, otherwise random"},
     {"channel_map", "usage: =[0x00-0xff], default: 0"},
     {"filter", "usage: =[none|scan|conn|both], default: none"},
     {"interval_min", "usage: =[0-UINT32_MAX], default: 0"},
@@ -606,7 +615,7 @@ cmd_advertise(int argc, char **argv)
     }
 
     own_addr_type = parse_arg_kv_dflt("own_addr_type", cmd_own_addr_types,
-                                      BLE_OWN_ADDR_PUBLIC, &rc);
+                                      btshell_get_default_own_addr_type(), &rc);
     if (rc != 0) {
         console_printf("invalid 'own_addr_type' parameter\n");
         return rc;
@@ -667,7 +676,7 @@ static const struct shell_param advertise_params[] = {
     {"discov", "discoverable mode, usage: =[non|ltd|gen], default: gen"},
     {"peer_addr_type", "usage: =[public|random|public_id|random_id], default: public"},
     {"peer_addr", "usage: =[XX:XX:XX:XX:XX:XX]"},
-    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public"},
+    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public if available, otherwise random"},
     {"channel_map", "usage: =[0x00-0xff], default: 0"},
     {"filter", "usage: =[none|scan|conn|both], default: none"},
     {"interval_min", "usage: =[0-UINT16_MAX], default: 0"},
@@ -743,7 +752,7 @@ cmd_connect(int argc, char **argv)
     }
 
     own_addr_type = parse_arg_kv_dflt("own_addr_type", cmd_own_addr_types,
-                                      BLE_OWN_ADDR_PUBLIC, &rc);
+                                      btshell_get_default_own_addr_type(), &rc);
     if (rc != 0) {
         console_printf("invalid 'own_addr_type' parameter\n");
         return rc;
@@ -960,7 +969,7 @@ static const struct shell_param connect_params[] = {
     {"extended", "usage: =[none|1M|coded|both|all], default: none"},
     {"peer_addr_type", "usage: =[public|random|public_id|random_id], default: public"},
     {"peer_addr", "usage: =[XX:XX:XX:XX:XX:XX]"},
-    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public"},
+    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public if available, otherwise random"},
     {"duration", "usage: =[1-INT32_MAX], default: 0"},
     {"scan_interval", "usage: =[0-UINT16_MAX], default: 0x0010"},
     {"scan_window", "usage: =[0-UINT16_MAX], default: 0x0010"},
@@ -1098,11 +1107,14 @@ static const struct shell_cmd_help disconnect_help = {
 static struct btshell_scan_opts g_scan_opts = {
         .limit = UINT16_MAX,
         .ignore_legacy = 0,
+        .periodic_only = 0,
+        .name_filter_len = 0,
 };
 
 static int
 cmd_set_scan_opts(int argc, char **argv)
 {
+    char *name_filter;
     int rc;
 
     rc = parse_arg_all(argc - 1, argv + 1);
@@ -1128,6 +1140,16 @@ cmd_set_scan_opts(int argc, char **argv)
         return rc;
     }
 
+    name_filter = parse_arg_extract("name_filter");
+    if (name_filter) {
+        strncpy(g_scan_opts.name_filter, name_filter, NAME_FILTER_LEN_MAX);
+        g_scan_opts.name_filter[NAME_FILTER_LEN_MAX - 1] = '\0';
+    } else {
+        g_scan_opts.name_filter[0] = '\0';
+    }
+
+    g_scan_opts.name_filter_len = strlen(g_scan_opts.name_filter);
+
     return rc;
 }
 
@@ -1136,6 +1158,7 @@ static const struct shell_param set_scan_opts_params[] = {
     {"decode_limit", "usage: =[0-UINT16_MAX], default: UINT16_MAX"},
     {"ignore_legacy", "usage: =[0-1], default: 0"},
     {"periodic_only", "usage: =[0-1], default: 0"},
+    {"name_filter", "usage: =name, default: {none}"},
     {NULL, NULL}
 };
 
@@ -1186,7 +1209,7 @@ cmd_scan(int argc, char **argv)
         return rc;
     }
 
-    if (argc > 1 && strcmp(argv[1], "cancel") == 0) {
+    if (argc > 1 && (strcmp(argv[1], "cancel") == 0 || strcmp(argv[1], "off") == 0)) {
         rc = btshell_scan_cancel();
         if (rc != 0) {
             console_printf("scan cancel fail: %d\n", rc);
@@ -1245,7 +1268,7 @@ cmd_scan(int argc, char **argv)
     }
 
     own_addr_type = parse_arg_kv_dflt("own_addr_type", cmd_own_addr_types,
-                                      BLE_OWN_ADDR_PUBLIC, &rc);
+                                      btshell_get_default_own_addr_type(), &rc);
     if (rc != 0) {
         console_printf("invalid 'own_addr_type' parameter\n");
         return rc;
@@ -1330,6 +1353,7 @@ cmd_scan(int argc, char **argv)
 #if MYNEWT_VAL(SHELL_CMD_HELP)
 static const struct shell_param scan_params[] = {
     {"cancel", "cancel scan procedure"},
+    {"off", "\"cancel\" param substitute"},
     {"extended", "usage: =[none|1M|coded|both], default: none"},
     {"duration", "usage: =[1-INT32_MAX], default: INT32_MAX"},
     {"limited", "usage: =[0-1], default: 0"},
@@ -1338,7 +1362,7 @@ static const struct shell_param scan_params[] = {
     {"window", "usage: =[0-UINT16_MAX], default: 0"},
     {"filter", "usage: =[no_wl|use_wl|no_wl_inita|use_wl_inita], default: no_wl"},
     {"nodups", "usage: =[0-1], default: 0"},
-    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public"},
+    {"own_addr_type", "usage: =[public|random|rpa_pub|rpa_rnd], default: public if available, otherwise random"},
     {"extended_duration", "usage: =[0-UINT16_MAX], default: 0"},
     {"extended_period", "usage: =[0-UINT16_MAX], default: 0"},
     {"longrange_interval", "usage: =[0-UINT16_MAX], default: 0"},

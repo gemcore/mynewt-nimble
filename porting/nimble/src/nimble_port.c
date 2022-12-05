@@ -24,12 +24,13 @@
 #include "nimble/nimble_port.h"
 #if NIMBLE_CFG_CONTROLLER
 #include "controller/ble_ll.h"
-#include "transport/ram/ble_hci_ram.h"
+#include "nimble/transport.h"
 #endif
 
 static struct ble_npl_eventq g_eventq_dflt;
 
 extern void os_msys_init(void);
+extern void os_mempool_module_init(void);
 
 void
 nimble_port_init(void)
@@ -37,15 +38,19 @@ nimble_port_init(void)
     /* Initialize default event queue */
     ble_npl_eventq_init(&g_eventq_dflt);
     /* Initialize the global memory pool */
+    os_mempool_module_init();
     os_msys_init();
+    /* Initialize transport */
+    ble_transport_init();
     /* Initialize the host */
-    ble_hs_init();
+    ble_transport_hs_init();
 
 #if NIMBLE_CFG_CONTROLLER
-    ble_hci_ram_init();
+#ifndef RIOT_VERSION
     hal_timer_init(5, NULL);
     os_cputime_init(32768);
-    ble_ll_init();
+#endif
+    ble_transport_ll_init();
 #endif
 }
 
